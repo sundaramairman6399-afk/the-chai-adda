@@ -1,150 +1,127 @@
 
 const mongoose = require("mongoose");
+const generateOrderNumber = require("../utils/generateOrderNumber");
 
-// Schema for individual food items
 const orderItemSchema = new mongoose.Schema(
   {
-    menuItemId: {
-      type: Number,
-      required: true
-    },
-
-    name: {
-      type: String,
+    productId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Product",
       required: true,
-      trim: true
     },
-
-    price: {
-      type: Number,
-      required: true,
-      min: 0
-    },
-
-    quantity: {
-      type: Number,
-      required: true,
-      min: 1
-    },
-
-    lineTotal: {
-      type: Number,
-      required: true,
-      min: 0
-    }
+    name: { type: String, required: true, trim: true },
+    // Variant label if applicable (e.g. "Medium")
+    variantLabel: { type: String, default: "" },
+    // Server-verified unit price
+    unitPrice: { type: Number, required: true, min: 0 },
+    quantity: { type: Number, required: true, min: 1 },
+    lineTotal: { type: Number, required: true, min: 0 },
+    specialNote: { type: String, default: "", trim: true },
   },
   { _id: false }
 );
 
-// Schema for payment details
-const paymentSchema = new mongoose.Schema(
+const statusHistorySchema = new mongoose.Schema(
   {
-    method: {
-      type: String,
-      enum: ["upi"],
-      default: "upi"
-    },
-
-    upiId: {
-      type: String,
-      default: ""
-    },
-
-    utr: {
-      type: String,
-      required: true,
-      trim: true
-    },
-
-    status: {
-      type: String,
-      enum: [
-        "pending_verification",
-        "verified",
-        "rejected"
-      ],
-      default: "pending_verification"
-    }
+    status: { type: String, required: true },
+    note: { type: String, default: "" },
+    updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    timestamp: { type: Date, default: Date.now },
   },
   { _id: false }
 );
 
-// Main Order Schema
 const orderSchema = new mongoose.Schema(
   {
-    customerName: {
+    orderNumber: {
       type: String,
-      required: true,
-      trim: true
+      unique: true,
     },
-
+    // Nullable — guest orders allowed
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    customerName: { type: String, required: true, trim: true },
+    customerEmail: { type: String, trim: true, default: "" },
     customerPhone: {
       type: String,
       required: true,
-      match: /^[0-9]{10}$/
+      match: [/^[0-9]{10}$/, "Phone must be 10 digits"],
     },
-
+    items: {
+      type: [orderItemSchema],
+      validate: {
+        validator: (v) => v.length > 0,
+        message: "Order must have at least one item",
+      },
+    },
     orderType: {
       type: String,
       enum: ["pickup", "delivery"],
-      required: true
+      required: true,
     },
+    deliveryAddress: { type: String, default: "", trim: true },
+    specialInstructions: { type: String, default: "", trim: true },
 
-    deliveryAddress: {
+    // Pricing (all server-computed)
+    subtotal: { type: Number, required: true, min: 0 },
+    discount: { type: Number, default: 0, min: 0 },
+    couponCode: { type: String, default: "" },
+    deliveryFee: { type: Number, default: 0, min: 0 },
+    tax: { type: Number, default: 0, min: 0 },
+    totalAmount: { type: Number, required: true, min: 0 },
+
+    // Payment
+    paymentMethod: {
       type: String,
-      default: "",
-      trim: true
+      enum: ["upi", "cash", "card", "online"],
+      default: "upi",
     },
-
-    specialInstructions: {
+    paymentStatus: {
       type: String,
-      default: "",
-      trim: true
+      enum: ["pending", "paid", "failed", "refunded"],
+      default: "pending",
     },
+    utr: { type: String, default: "", trim: true }, // UPI transaction ref
 
-    items: {
-      type: [orderItemSchema],
-      required: true,
-      validate: {
-        validator: items => items.length > 0,
-        message: "An order must contain at least one item"
-      }
-    },
-
-    totalItems: {
-      type: Number,
-      required: true,
-      min: 1
-    },
-
-    totalAmount: {
-      type: Number,
-      required: true,
-      min: 0
-    },
-
-    payment: {
-      type: paymentSchema,
-      required: true
-    },
-
-    status: {
+    // Order lifecycle
+    orderStatus: {
       type: String,
       enum: [
         "pending",
-        "accepted",
+        "confirmed",
+        "preparing",
+        "ready",
+        "out_for_delivery",
+        "delivered",
+        "cancelled",
         "rejected",
-        "completed",
-        "cancelled"
       ],
-      default: "pending"
-    }
+      default: "pending",
+    },
+    statusHistory: [statusHistorySchema],
+
+    estimatedReadyAt: { type: Date, default: null },
+    cancelledAt: { type: Date, default: null },
+    cancelReason: { type: String, default: "" },
   },
-  {
-    timestamps: true
-  }
+  { timestamps: true }
 );
 
-const Order = mongoose.model("Order", orderSchema);
+// Auto-generate orderNumber before first save
+orderSchema.pre("save", function (next) {
+  if (this.isNew && !this.orderNumber) {
+    this.orderNumber = generateOrderNumber();
+  }
+  next();
+});
 
+orderSchema.index({ orderNumber: 1 });
+orderSchema.index({ userId: 1, createdAt: -1 });
+orderSchema.index({ orderStatus: 1, createdAt: -1 });
+orderSchema.index({ customerPhone: 1 });
+
+const Order = mongoose.model("Order", orderSchema);
 module.exports = Order;
