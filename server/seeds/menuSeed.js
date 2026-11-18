@@ -21,6 +21,8 @@ const categoryData = [
   { name: "Bites",       displayOrder: 8, description: "Quick bites and snacks" },
 ];
 
+const slugify = (value) => value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
 const getProductData = (cats) => {
   const catMap = Object.fromEntries(cats.map((c) => [c.name, c._id]));
 
@@ -87,25 +89,37 @@ const seed = async () => {
     await connectDB();
     console.log("🌱 Starting menu seed...\n");
 
-    // Clear existing data
-    await Category.deleteMany({});
-    await Product.deleteMany({});
-    console.log("🗑  Cleared existing categories and products");
+    // Upsert categories by name. Existing unrelated records are never deleted.
+    const cats = [];
+    for (const category of categoryData) {
+      const slug = slugify(category.name);
+      const savedCategory = await Category.findOneAndUpdate(
+        { name: category.name },
+        { $set: { ...category, slug, isActive: true } },
+        { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
+      );
+      cats.push(savedCategory);
+    }
+    console.log(`✅ Upserted ${cats.length} categories`);
 
-    // Create categories
-    const cats = await Category.insertMany(categoryData);
-    console.log(`✅ Created ${cats.length} categories`);
-
-    // Create products
+    // Upsert products by name, preserving their category references and avoiding duplicates.
     const productData = getProductData(cats);
-    const products = await Product.insertMany(productData);
-    console.log(`✅ Created ${products.length} products`);
+    for (const product of productData) {
+      const slug = slugify(product.name);
+      await Product.findOneAndUpdate(
+        { name: product.name },
+        { $set: { ...product, slug, isAvailable: true } },
+        { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
+      );
+    }
+    console.log(`✅ Upserted ${productData.length} products`);
 
-    console.log("\n🍵 Menu seed complete!\n");
-    process.exit(0);
+    console.log("\n🍵 Menu seed complete! Existing unrelated records were left untouched.\n");
   } catch (err) {
     console.error("❌ Seed failed:", err.message);
-    process.exit(1);
+    process.exitCode = 1;
+  } finally {
+    await mongoose.disconnect();
   }
 };
 
