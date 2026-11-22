@@ -206,7 +206,7 @@ const getOrder = asyncHandler(async (req, res) => {
 // GET /api/orders/track/:orderNumber (public — by order number)
 const trackOrder = asyncHandler(async (req, res) => {
   const order = await Order.findOne({ orderNumber: req.params.orderNumber }).select(
-    "orderNumber orderStatus paymentStatus statusHistory estimatedReadyAt customerName orderType createdAt items totalAmount"
+    "orderNumber orderStatus estimatedReadyAt orderType createdAt"
   );
   if (!order) return sendError(res, 404, "Order not found");
   return sendSuccess(res, 200, "Order found", { order });
