@@ -1,255 +1,374 @@
-
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import api, { getApiErrorMessage } from "@/lib/api";
+import {
+  addItem,
+  cartItemCount,
+  cartSubtotal,
+  loadCart,
+  removeItem,
+  saveCart,
+  updateQty,
+  type CartItem,
+} from "@/lib/cart";
 
-type MenuItem = {
-  id: number;
-  name: string;
-  category: string;
-  price: string;
-  description: string;
-};
-
-type CartItem = {
-  cartKey: string;
-  id: number;
-  name: string;
+type ProductVariant = {
+  label: string;
   price: number;
-  quantity: number;
 };
 
-const menuItems: MenuItem[] = [
-  // PIZZA
-  { id: 1, name: "Margarita Pizza", category: "Pizza", price: "₹160 / ₹240 / ₹310", description: "Classic margarita pizza." },
-  { id: 2, name: "Tomato Pizza", category: "Pizza", price: "₹170 / ₹260 / ₹350", description: "Pizza topped with tomato." },
-  { id: 3, name: "Multiveg Pizza", category: "Pizza", price: "₹180 / ₹290 / ₹370", description: "Pizza with mixed vegetables." },
-  { id: 4, name: "Special Heart Pizza", category: "Pizza", price: "₹310 / ₹380", description: "Our special heart-shaped pizza." },
-  { id: 5, name: "Cheese Paneer Pizza", category: "Pizza", price: "₹310 / ₹390", description: "Cheese and paneer pizza." },
+type CategoryRef = {
+  _id: string;
+  name: string;
+  slug: string;
+};
 
-  // BURGER
-  { id: 6, name: "Veg Burger", category: "Burger", price: "₹90", description: "Classic vegetable burger." },
-  { id: 7, name: "Veg Paneer Burger", category: "Burger", price: "₹110", description: "Vegetable burger with paneer." },
-  { id: 8, name: "Cheese Burger", category: "Burger", price: "₹115", description: "Burger loaded with cheese." },
-  { id: 9, name: "Cheese Paneer Burger", category: "Burger", price: "₹120", description: "Paneer and cheese burger." },
+type Category = CategoryRef & {
+  displayOrder?: number;
+};
 
-  // SANDWICH
-  { id: 10, name: "Veg Sandwich", category: "Sandwich", price: "₹100", description: "Fresh vegetable sandwich." },
-  { id: 11, name: "Veg Paneer Sandwich", category: "Sandwich", price: "₹110", description: "Vegetable and paneer sandwich." },
-  { id: 12, name: "Veg Cheese Sandwich", category: "Sandwich", price: "₹120", description: "Vegetable sandwich with cheese." },
-  { id: 13, name: "Cheese Paneer Sandwich", category: "Sandwich", price: "₹130", description: "Paneer sandwich with cheese." },
-  { id: 14, name: "Pizza Sandwich", category: "Sandwich", price: "₹180", description: "Pizza-style sandwich." },
+type Product = {
+  _id: string;
+  name: string;
+  description: string;
+  price: number;
+  variants: ProductVariant[];
+  images: string[];
+  category: CategoryRef | string;
+};
 
-  // PETTIES
-  { id: 15, name: "Aloo Peties", category: "Petties", price: "₹70", description: "Potato-filled crispy snack." },
-  { id: 16, name: "Paneer Peties", category: "Petties", price: "₹80", description: "Paneer-filled snack." },
-  { id: 17, name: "Cheese Peties", category: "Petties", price: "₹90", description: "Cheese-filled snack." },
+type PlacedOrderItem = {
+  name: string;
+  variantLabel: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+};
 
-  // CHINESE
-  { id: 18, name: "Chowmeen", category: "Chinese", price: "₹110", description: "Classic Chinese noodles." },
-  { id: 19, name: "Paneer Chowmeen", category: "Chinese", price: "₹150", description: "Noodles with paneer." },
-  { id: 20, name: "Hakka Noodle", category: "Chinese", price: "₹130", description: "Hakka-style noodles." },
-  { id: 21, name: "Spicy Schezwan Noodle", category: "Chinese", price: "₹130", description: "Spicy Schezwan noodles." },
-  { id: 22, name: "Chilli Potato", category: "Chinese", price: "₹160", description: "Crispy potato in chilli sauce." },
-  { id: 23, name: "Honey Chilli Potato", category: "Chinese", price: "₹160", description: "Crispy potato with honey chilli sauce." },
-  { id: 24, name: "Chilli Paneer", category: "Chinese", price: "₹190", description: "Paneer tossed in chilli sauce." },
-
-  // SOUTH INDIAN
-  { id: 25, name: "Masala Dosa", category: "South Indian", price: "₹120", description: "Dosa with potato masala." },
-  { id: 26, name: "Paneer Dosa", category: "South Indian", price: "₹130", description: "Dosa filled with paneer." },
-  { id: 27, name: "Chinese Dosa", category: "South Indian", price: "₹140", description: "Dosa with Chinese-style filling." },
-  { id: 28, name: "Veg Uttapam", category: "South Indian", price: "₹130", description: "Uttapam topped with vegetables." },
-  { id: 29, name: "Paneer Uttapam", category: "South Indian", price: "₹140", description: "Uttapam topped with paneer." },
-
-  // NASTA
-  { id: 30, name: "Aloo Paratha", category: "Nasta", price: "₹90", description: "Potato-stuffed paratha." },
-  { id: 31, name: "Paneer Paratha", category: "Nasta", price: "₹100", description: "Paneer-stuffed paratha." },
-  { id: 32, name: "Mix Veg Paratha", category: "Nasta", price: "₹110", description: "Paratha stuffed with mixed vegetables." },
-  { id: 33, name: "Special Cheese Paratha", category: "Nasta", price: "₹140", description: "Special paratha with cheese." },
-
-  // BITES
-  { id: 34, name: "Pav Bhaji", category: "Bites", price: "₹120", description: "Mumbai-style pav bhaji." },
-  { id: 35, name: "French Fries", category: "Bites", price: "₹100", description: "Crispy golden French fries." },
-  { id: 36, name: "Cheese Pav Bhaji", category: "Bites", price: "₹120", description: "Pav bhaji topped with cheese." },
-  { id: 37, name: "Plain Maggi", category: "Bites", price: "₹105", description: "Classic Maggi noodles." },
-  { id: 38, name: "Butter Maggi", category: "Bites", price: "₹115", description: "Maggi prepared with butter." },
-  { id: 39, name: "Cheese Maggi", category: "Bites", price: "₹130", description: "Maggi topped with cheese." },
-];
-
-const categories = [
-  "All",
-  "Pizza",
-  "Burger",
-  "Sandwich",
-  "Petties",
-  "Chinese",
-  "South Indian",
-  "Nasta",
-  "Bites",
-];
+type PlacedOrder = {
+  orderNumber: string;
+  totalAmount: number;
+  subtotal: number;
+  deliveryFee: number;
+  paymentStatus: string;
+  orderStatus: string;
+  items: PlacedOrderItem[];
+};
 
 const WHATSAPP_NUMBER = "918266906688";
 const UPI_ID = "8266906688@ybl";
 const PAYEE_NAME = "The Chai Adda";
+// Matches DELIVERY_FEE in server/controllers/orderController.js.
+// The backend recalculates this when the order is created.
+const DELIVERY_FEE = 30;
+
+function categoryName(product: Product): string {
+  if (product.category && typeof product.category === "object") {
+    return product.category.name;
+  }
+  return "Menu";
+}
+
+function formatRupees(amount: number): string {
+  return Number.isInteger(amount) ? `₹${amount}` : `₹${amount.toFixed(2)}`;
+}
+
+function selectedVariantLabel(product: Product, selected: Record<string, string>): string {
+  const chosen = selected[product._id];
+  if (chosen && product.variants.some((variant) => variant.label === chosen)) {
+    return chosen;
+  }
+  return product.variants[0]?.label ?? "";
+}
+
+function unitPriceFor(product: Product, variantLabel: string): number {
+  const variant = product.variants.find(
+    (item) => item.label.toLowerCase() === variantLabel.toLowerCase()
+  );
+  return variant ? variant.price : product.price;
+}
+
+function priceLabel(product: Product): string {
+  if (product.variants.length === 0) return formatRupees(product.price);
+  if (product.variants.length === 1) return formatRupees(product.variants[0].price);
+  return product.variants.map((variant) => formatRupees(variant.price)).join(" / ");
+}
+
+function reconcileCartPrices(cart: CartItem[], products: Product[]): CartItem[] {
+  let changed = false;
+  const next = cart.map((item) => {
+    const product = products.find((entry) => entry._id === item.productId);
+    if (!product) return item;
+    const hasVariant = item.variantLabel.length > 0;
+    const variant = hasVariant
+      ? product.variants.find(
+          (entry) => entry.label.toLowerCase() === item.variantLabel.toLowerCase()
+        )
+      : undefined;
+    if (hasVariant && !variant) return item;
+    const unitPrice = variant ? variant.price : product.price;
+    if (unitPrice === item.unitPrice) return item;
+    changed = true;
+    return { ...item, unitPrice };
+  });
+  return changed ? next : cart;
+}
+
+function whatsappMessage(details: {
+  order: PlacedOrder;
+  customerName: string;
+  customerPhone: string;
+  orderType: "pickup" | "delivery";
+  deliveryAddress: string;
+  specialInstructions: string;
+  utr: string;
+}): string {
+  const lines = details.order.items
+    .map((item) => {
+      const variant = item.variantLabel ? ` (${item.variantLabel})` : "";
+      return `${item.name}${variant} x ${item.quantity} = ${formatRupees(item.lineTotal)}`;
+    })
+    .join("\n");
+
+  return `Hello The Chai Adda! I have made a UPI payment and would like to submit my order for verification.
+
+Order Number: ${details.order.orderNumber}
+Customer Name: ${details.customerName}
+Customer Phone: ${details.customerPhone}
+Order Type: ${details.orderType.toUpperCase()}
+${details.orderType === "delivery" ? `Delivery Address: ${details.deliveryAddress}` : "Collection: Pickup"}
+Special Instructions: ${details.specialInstructions || "None"}
+
+ORDER DETAILS:
+${lines}
+
+TOTAL AMOUNT: ${formatRupees(details.order.totalAmount)}
+UPI ID: ${UPI_ID}
+Transaction Reference / UTR: ${details.utr}
+
+PAYMENT STATUS: PENDING OWNER VERIFICATION
+Please verify the payment in your account and confirm or reject my order. Thank you!`;
+}
 
 export default function MenuPage() {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
   const [activeCategory, setActiveCategory] = useState("All");
   const [search, setSearch] = useState("");
+  const [selectedVariants, setSelectedVariants] = useState<Record<string, string>>({});
 
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [selectedPrices, setSelectedPrices] = useState<Record<number, number>>({});
+  const [cartReady, setCartReady] = useState(false);
+
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [orderType, setOrderType] = useState<"pickup" | "delivery">("pickup");
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [specialInstructions, setSpecialInstructions] = useState("");
   const [utr, setUtr] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [orderError, setOrderError] = useState("");
+  const [placedOrder, setPlacedOrder] = useState<PlacedOrder | null>(null);
+  const [verificationUrl, setVerificationUrl] = useState("");
 
-  const filteredItems = useMemo(() => {
-    return menuItems.filter((item) => {
-      const matchesCategory =
-        activeCategory === "All" || item.category === activeCategory;
+  const loadMenu = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const [productResult, categoryResult] = await Promise.allSettled([
+        api.get<{ success: boolean; message?: string; products?: Product[] }>("/products", {
+          params: { available: true, limit: 100 },
+        }),
+        api.get<{ success: boolean; categories?: Category[] }>("/categories"),
+      ]);
 
-      const matchesSearch = item.name
-        .toLowerCase()
-        .includes(search.toLowerCase().trim());
-
-      return matchesCategory && matchesSearch;
-    });
-  }, [activeCategory, search]);
-
-  const getPrices = (priceText: string): number[] => {
-    return (priceText.match(/\d+/g) || []).map(Number);
-  };
-
-  const addToCart = (item: MenuItem) => {
-    const prices = getPrices(item.price);
-    const price = selectedPrices[item.id] ?? prices[0];
-    const cartKey = `${item.id}-${price}`;
-
-    setCart((previousCart) => {
-      const existingItem = previousCart.find(
-        (cartItem) => cartItem.cartKey === cartKey
-      );
-
-      if (existingItem) {
-        return previousCart.map((cartItem) =>
-          cartItem.cartKey === cartKey
-            ? { ...cartItem, quantity: cartItem.quantity + 1 }
-            : cartItem
-        );
+      if (productResult.status === "rejected") {
+        setProducts([]);
+        setLoadError(getApiErrorMessage(productResult.reason, "Could not load the menu. Please try again."));
+        return;
       }
 
-      return [
-        ...previousCart,
-        {
-          cartKey,
-          id: item.id,
-          name: item.name,
-          price,
-          quantity: 1,
-        },
-      ];
+      const productData = productResult.value.data;
+      if (!productData.success) {
+        setProducts([]);
+        setLoadError(productData.message || "Could not load the menu. Please try again.");
+        return;
+      }
+
+      setProducts(productData.products ?? []);
+
+      if (categoryResult.status === "fulfilled" && categoryResult.value.data.success) {
+        setCategories(categoryResult.value.data.categories ?? []);
+      } else {
+        setCategories([]);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadMenu();
+  }, [loadMenu]);
+
+  useEffect(() => {
+    setCart(loadCart());
+    setCartReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!cartReady) return;
+    saveCart(cart);
+  }, [cart, cartReady]);
+
+  useEffect(() => {
+    if (!cartReady || products.length === 0) return;
+    setCart((current) => reconcileCartPrices(current, products));
+  }, [cartReady, products]);
+
+  const categoryOptions = useMemo(() => {
+    if (categories.length > 0) {
+      return ["All", ...categories.map((category) => category.name)];
+    }
+    const names = products.map(categoryName).filter((name, index, all) => all.indexOf(name) === index);
+    return ["All", ...names];
+  }, [categories, products]);
+
+  useEffect(() => {
+    if (activeCategory !== "All" && !categoryOptions.includes(activeCategory)) {
+      setActiveCategory("All");
+    }
+  }, [activeCategory, categoryOptions]);
+
+  const filteredItems = useMemo(() => {
+    const query = search.toLowerCase().trim();
+    return products.filter((item) => {
+      const matchesCategory = activeCategory === "All" || categoryName(item) === activeCategory;
+      const matchesSearch = item.name.toLowerCase().includes(query);
+      return matchesCategory && matchesSearch;
     });
+  }, [products, activeCategory, search]);
+
+  const menuLoaded = !loading && !loadError;
+
+  const addToCart = (product: Product) => {
+    const variantLabel = selectedVariantLabel(product, selectedVariants);
+    setCart((previousCart) =>
+      addItem(previousCart, {
+        productId: product._id,
+        name: product.name,
+        variantLabel,
+        unitPrice: unitPriceFor(product, variantLabel),
+        quantity: 1,
+        image: product.images?.[0],
+      })
+    );
   };
 
   const increaseQuantity = (cartKey: string) => {
-    setCart((previousCart) =>
-      previousCart.map((item) =>
-        item.cartKey === cartKey
-          ? { ...item, quantity: item.quantity + 1 }
-          : item
-      )
-    );
+    setCart((previousCart) => {
+      const item = previousCart.find((entry) => entry.cartKey === cartKey);
+      if (!item) return previousCart;
+      return updateQty(previousCart, cartKey, item.quantity + 1);
+    });
   };
 
   const decreaseQuantity = (cartKey: string) => {
-    setCart((previousCart) =>
-      previousCart
-        .map((item) =>
-          item.cartKey === cartKey
-            ? { ...item, quantity: item.quantity - 1 }
-            : item
-        )
-        .filter((item) => item.quantity > 0)
-    );
+    setCart((previousCart) => {
+      const item = previousCart.find((entry) => entry.cartKey === cartKey);
+      if (!item) return previousCart;
+      return updateQty(previousCart, cartKey, item.quantity - 1);
+    });
   };
 
   const removeFromCart = (cartKey: string) => {
-    setCart((previousCart) =>
-      previousCart.filter((item) => item.cartKey !== cartKey)
-    );
+    setCart((previousCart) => removeItem(previousCart, cartKey));
   };
 
-  const totalItems = cart.reduce(
-    (total, item) => total + item.quantity,
-    0
-  );
+  const totalItems = cartItemCount(cart);
+  const subtotal = cartSubtotal(cart);
+  const deliveryFee = orderType === "delivery" ? DELIVERY_FEE : 0;
+  const estimatedTotal = subtotal + deliveryFee;
 
-  const totalPrice = cart.reduce(
-    (total, item) => total + item.price * item.quantity,
-    0
-  );
+  const upiPaymentUrl = `upi://pay?pa=${encodeURIComponent(UPI_ID)}&pn=${encodeURIComponent(PAYEE_NAME)}&am=${estimatedTotal}&cu=INR&tn=${encodeURIComponent("The Chai Adda order")}`;
 
-  const upiPaymentUrl = `upi://pay?pa=${encodeURIComponent(UPI_ID)}&pn=${encodeURIComponent(PAYEE_NAME)}&am=${totalPrice}&cu=INR&tn=${encodeURIComponent("The Chai Adda order")}`;
+  const placeOrder = async () => {
+    setOrderError("");
+    setPlacedOrder(null);
+    setVerificationUrl("");
 
-  const placeOrder = () => {
     if (cart.length === 0) {
-      alert("Please add at least one item to your cart.");
+      setOrderError("Please add at least one item to your cart.");
       return;
     }
 
     if (!customerName.trim() || !customerPhone.trim()) {
-      alert("Please enter your name and phone number.");
+      setOrderError("Please enter your name and phone number.");
       return;
     }
 
     if (!/^[0-9]{10}$/.test(customerPhone.trim())) {
-      alert("Please enter a valid 10-digit phone number.");
+      setOrderError("Please enter a valid 10-digit phone number.");
       return;
     }
 
     if (orderType === "delivery" && !deliveryAddress.trim()) {
-      alert("Please enter your delivery address.");
+      setOrderError("Please enter your delivery address.");
       return;
     }
 
     if (!utr.trim()) {
-      alert("After paying, enter your UPI transaction reference (UTR).");
+      setOrderError("After paying, enter your UPI transaction reference (UTR).");
       return;
     }
 
-    const orderLines = cart
-      .map(
-        (item) =>
-          `${item.name} x ${item.quantity} = ₹${item.price * item.quantity}`
-      )
-      .join("\n");
+    setSubmitting(true);
+    try {
+      const { data } = await api.post<{
+        success: boolean;
+        message?: string;
+        order?: PlacedOrder;
+      }>("/orders", {
+        customerName: customerName.trim(),
+        customerPhone: customerPhone.trim(),
+        orderType,
+        deliveryAddress: orderType === "delivery" ? deliveryAddress.trim() : "",
+        specialInstructions: specialInstructions.trim(),
+        items: cart.map((item) => ({
+          productId: item.productId,
+          variantLabel: item.variantLabel,
+          quantity: item.quantity,
+        })),
+        utr: utr.trim(),
+      });
 
-    const message = `Hello The Chai Adda! I have made a UPI payment and would like to submit my order for verification.
+      if (!data.success || !data.order?.orderNumber) {
+        setOrderError(data.message || "The restaurant did not confirm this order. Nothing was placed.");
+        return;
+      }
 
-Customer Name: ${customerName.trim()}
-Customer Phone: ${customerPhone.trim()}
-Order Type: ${orderType.toUpperCase()}
-${orderType === "delivery" ? `Delivery Address: ${deliveryAddress.trim()}` : "Collection: Pickup"}
-Special Instructions: ${specialInstructions.trim() || "None"}
+      const message = whatsappMessage({
+        order: data.order,
+        customerName: customerName.trim(),
+        customerPhone: customerPhone.trim(),
+        orderType,
+        deliveryAddress: deliveryAddress.trim(),
+        specialInstructions: specialInstructions.trim(),
+        utr: utr.trim(),
+      });
 
-ORDER DETAILS:
-${orderLines}
-
-Total Items: ${totalItems}
-TOTAL AMOUNT: ₹${totalPrice}
-UPI ID: ${UPI_ID}
-Transaction Reference / UTR: ${utr.trim()}
-
-PAYMENT STATUS: PENDING OWNER VERIFICATION
-Please verify the payment in your account and confirm or reject my order. Thank you!`;
-
-    const whatsappURL = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(
-      message
-    )}`;
-
-    window.location.href = whatsappURL;
+      setPlacedOrder(data.order);
+      setVerificationUrl(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`);
+      setCart([]);
+    } catch (error) {
+      setOrderError(getApiErrorMessage(error, "The order was not placed. Please try again."));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -328,7 +447,7 @@ Please verify the payment in your account and confirm or reject my order. Thank 
         </div>
 
         <div className="menu-filters">
-          {categories.map((category) => (
+          {categoryOptions.map((category) => (
             <button
               key={category}
               type="button"
@@ -344,94 +463,113 @@ Please verify the payment in your account and confirm or reject my order. Thank 
           ))}
         </div>
 
-        <div className="catalog-result">
-          <span>
-            {activeCategory === "All"
-              ? "Our Full Menu"
-              : activeCategory}
-          </span>
-          <span>{filteredItems.length} ITEMS</span>
-        </div>
-
-        <div className="full-menu-grid">
-          {filteredItems.map((item) => {
-            const prices = getPrices(item.price);
-            const selectedPrice = selectedPrices[item.id] ?? prices[0];
-
-            return (
-              <article
-                className="full-menu-card"
-                key={item.id}
-              >
-                <div className="full-menu-card-top">
-                  <span className="full-menu-category">
-                    {item.category}
-                  </span>
-
-                  <span className="full-menu-number">
-                    {String(item.id).padStart(2, "0")}
-                  </span>
-                </div>
-
-                <div className="full-menu-info">
-                  <div className="full-menu-title-row">
-                    <h3>{item.name}</h3>
-                    <strong>
-                      {prices.length === 1
-                        ? `₹${prices[0]}`
-                        : item.price}
-                    </strong>
-                  </div>
-
-                  <p>{item.description}</p>
-
-                  {prices.length > 1 && (
-                    <div className="cart-price-selector">
-                      <label htmlFor={`price-${item.id}`}>
-                        Choose price:
-                      </label>
-                      <select
-                        id={`price-${item.id}`}
-                        value={selectedPrice}
-                        onChange={(event) =>
-                          setSelectedPrices((previous) => ({
-                            ...previous,
-                            [item.id]: Number(event.target.value),
-                          }))
-                        }
-                      >
-                        {prices.map((price, index) => (
-                          <option key={`${price}-${index}`} value={price}>
-                            ₹{price}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    className="add-cart-button"
-                    onClick={() => addToCart(item)}
-                  >
-                    <span>+</span> Add to Cart
-                  </button>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-
-        {filteredItems.length === 0 && (
-          <p className="menu-empty">
-            No items found. Try another search.
+        {loading && (
+          <p className="menu-empty" role="status">
+            Loading the menu...
           </p>
         )}
 
-        <p className="menu-price-note">
-          * Prices include an additional ₹30 per product.
-          Pizza price options each include the ₹30 increase.
-        </p>
+        {!loading && loadError && (
+          <div className="menu-empty" role="alert">
+            <p>{loadError}</p>
+            <button type="button" className="menu-retry" onClick={() => void loadMenu()}>
+              Try again
+            </button>
+          </div>
+        )}
+
+        {menuLoaded && (
+          <>
+            <div className="catalog-result">
+              <span>
+                {activeCategory === "All"
+                  ? "Our Full Menu"
+                  : activeCategory}
+              </span>
+              <span>{filteredItems.length} ITEMS</span>
+            </div>
+
+            <div className="full-menu-grid">
+              {filteredItems.map((item) => {
+                const variantLabel = selectedVariantLabel(item, selectedVariants);
+                const itemNumber = String(
+                  products.findIndex((product) => product._id === item._id) + 1
+                ).padStart(2, "0");
+
+                return (
+                  <article
+                    className="full-menu-card"
+                    key={item._id}
+                  >
+                    <div className="full-menu-card-top">
+                      <span className="full-menu-category">
+                        {categoryName(item)}
+                      </span>
+
+                      <span className="full-menu-number">
+                        {itemNumber}
+                      </span>
+                    </div>
+
+                    <div className="full-menu-info">
+                      <div className="full-menu-title-row">
+                        <h3>{item.name}</h3>
+                        <strong>{priceLabel(item)}</strong>
+                      </div>
+
+                      <p>{item.description}</p>
+
+                      {item.variants.length > 1 && (
+                        <div className="cart-price-selector">
+                          <label htmlFor={`variant-${item._id}`}>
+                            Choose option:
+                          </label>
+                          <select
+                            id={`variant-${item._id}`}
+                            value={variantLabel}
+                            onChange={(event) =>
+                              setSelectedVariants((previous) => ({
+                                ...previous,
+                                [item._id]: event.target.value,
+                              }))
+                            }
+                          >
+                            {item.variants.map((variant) => (
+                              <option key={variant.label} value={variant.label}>
+                                {variant.label} — {formatRupees(variant.price)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        className="add-cart-button"
+                        onClick={() => addToCart(item)}
+                      >
+                        <span>+</span> Add to Cart
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+
+            {filteredItems.length === 0 && (
+              <p className="menu-empty">
+                {products.length === 0
+                  ? "No dishes are available right now."
+                  : "No items found. Try another search."}
+              </p>
+            )}
+
+            <p className="menu-price-note">
+              * Menu prices come from The Chai Adda. Delivery orders include a ₹30
+              delivery fee, which is confirmed when the order is placed.
+            </p>
+          </>
+        )}
       </section>
 
       {/* SHOPPING CART */}
@@ -463,47 +601,67 @@ Please verify the payment in your account and confirm or reject my order. Thank 
               </div>
             ) : (
               <div className="cart-list">
-                {cart.map((item) => (
-                  <div className="cart-item" key={item.cartKey}>
-                    <div className="cart-item-details">
-                      <h4>{item.name}</h4>
-                      <p>₹{item.price} each</p>
-                      <strong>
-                        ₹{item.price * item.quantity}
-                      </strong>
-                    </div>
+                {cart.map((item) => {
+                  const product = products.find((entry) => entry._id === item.productId);
+                  const missingProduct = menuLoaded && !product;
+                  const missingVariant = Boolean(
+                    product &&
+                      item.variantLabel &&
+                      !product.variants.some(
+                        (variant) => variant.label.toLowerCase() === item.variantLabel.toLowerCase()
+                      )
+                  );
 
-                    <div className="cart-item-actions">
-                      <div className="quantity-control">
-                        <button
-                          type="button"
-                          onClick={() => decreaseQuantity(item.cartKey)}
-                          aria-label={`Decrease ${item.name} quantity`}
-                        >
-                          −
-                        </button>
-
-                        <span>{item.quantity}</span>
-
-                        <button
-                          type="button"
-                          onClick={() => increaseQuantity(item.cartKey)}
-                          aria-label={`Increase ${item.name} quantity`}
-                        >
-                          +
-                        </button>
+                  return (
+                    <div className="cart-item" key={item.cartKey}>
+                      <div className="cart-item-details">
+                        <h4>{item.name}</h4>
+                        <p>
+                          {item.variantLabel ? `${item.variantLabel} · ` : ""}
+                          {formatRupees(item.unitPrice)} each
+                        </p>
+                        <strong>
+                          {formatRupees(item.unitPrice * item.quantity)}
+                        </strong>
+                        {(missingProduct || missingVariant) && (
+                          <p className="cart-item-warning">
+                            This item may no longer be available. Remove it or choose another option.
+                          </p>
+                        )}
                       </div>
 
-                      <button
-                        type="button"
-                        className="remove-cart-button"
-                        onClick={() => removeFromCart(item.cartKey)}
-                      >
-                        Remove
-                      </button>
+                      <div className="cart-item-actions">
+                        <div className="quantity-control">
+                          <button
+                            type="button"
+                            onClick={() => decreaseQuantity(item.cartKey)}
+                            aria-label={`Decrease ${item.name} quantity`}
+                          >
+                            −
+                          </button>
+
+                          <span>{item.quantity}</span>
+
+                          <button
+                            type="button"
+                            onClick={() => increaseQuantity(item.cartKey)}
+                            aria-label={`Increase ${item.name} quantity`}
+                          >
+                            +
+                          </button>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="remove-cart-button"
+                          onClick={() => removeFromCart(item.cartKey)}
+                        >
+                          Remove
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
@@ -528,18 +686,57 @@ Please verify the payment in your account and confirm or reject my order. Thank 
 
             <div className="checkout-total-row">
               <span>Subtotal</span>
-              <strong>₹{totalPrice}</strong>
+              <strong>{formatRupees(subtotal)}</strong>
             </div>
 
+            {orderType === "delivery" && (
+              <div className="checkout-total-row">
+                <span>Delivery fee</span>
+                <strong>{formatRupees(deliveryFee)}</strong>
+              </div>
+            )}
+
             <div className="checkout-grand-total">
-              <span>Total Amount</span>
-              <strong>₹{totalPrice}</strong>
+              <span>Estimated Total</span>
+              <strong>{formatRupees(estimatedTotal)}</strong>
             </div>
 
             <p className="checkout-note">
-              Pay the exact amount using UPI. Your order is not confirmed until
-              The Chai Adda verifies the payment and accepts the order.
+              Pay the exact amount using UPI. The restaurant calculates the final
+              total when you submit. Your payment stays pending until The Chai Adda
+              verifies it and accepts the order.
             </p>
+
+            {placedOrder && (
+              <div className="order-success" role="status">
+                <h4>Order submitted</h4>
+                <p>
+                  Order number: <strong>{placedOrder.orderNumber}</strong>
+                </p>
+                <p>
+                  Confirmed total: <strong>{formatRupees(placedOrder.totalAmount)}</strong>
+                </p>
+                <p>
+                  Payment status: pending verification. This payment has not been marked as paid.
+                </p>
+                {verificationUrl && (
+                  <a
+                    className="whatsapp-order-button order-whatsapp-link"
+                    href={verificationUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <span>☏</span> Send verification on WhatsApp
+                  </a>
+                )}
+              </div>
+            )}
+
+            {orderError && (
+              <p className="order-error" role="alert">
+                {orderError}
+              </p>
+            )}
 
             <div className="customer-form">
               <label htmlFor="customer-name">
@@ -618,7 +815,7 @@ Please verify the payment in your account and confirm or reject my order. Thank 
 
             <div className="upi-payment-box">
               <h4>Pay securely using UPI</h4>
-              <p className="upi-amount">Amount to pay: ₹{totalPrice}</p>
+              <p className="upi-amount">Amount to pay: {formatRupees(estimatedTotal)}</p>
               <p className="upi-id-line">
                 UPI ID: <strong>{UPI_ID}</strong>
               </p>
@@ -626,7 +823,7 @@ Please verify the payment in your account and confirm or reject my order. Thank 
                 className="upi-pay-button"
                 href={upiPaymentUrl}
               >
-                Pay ₹{totalPrice} via UPI
+                Pay {formatRupees(estimatedTotal)} via UPI
               </a>
               <p className="upi-help">
                 Open your UPI app, complete the payment, then return here and
@@ -637,10 +834,10 @@ Please verify the payment in your account and confirm or reject my order. Thank 
             <button
               type="button"
               className="whatsapp-order-button"
-              onClick={placeOrder}
-              disabled={cart.length === 0}
+              onClick={() => void placeOrder()}
+              disabled={cart.length === 0 || submitting}
             >
-              <span>☏</span> Submit Order for Verification
+              <span>☏</span> {submitting ? "Submitting order..." : "Submit Order for Verification"}
             </button>
 
             <p className="whatsapp-number-note">
@@ -701,7 +898,8 @@ Please verify the payment in your account and confirm or reject my order. Thank 
           font: inherit;
         }
 
-        .add-cart-button {
+        .add-cart-button,
+        .menu-retry {
           width: 100%;
           margin-top: 14px;
           padding: 12px 16px;
@@ -715,7 +913,13 @@ Please verify the payment in your account and confirm or reject my order. Thank 
           transition: background 0.2s ease, transform 0.2s ease;
         }
 
-        .add-cart-button:hover {
+        .menu-retry {
+          width: auto;
+          min-width: 140px;
+        }
+
+        .add-cart-button:hover,
+        .menu-retry:hover {
           background: #3b281d;
           transform: translateY(-2px);
         }
@@ -823,6 +1027,11 @@ Please verify the payment in your account and confirm or reject my order. Thank 
           color: #9b6845;
         }
 
+        .cart-item-warning {
+          color: #a44c3c !important;
+          margin-top: 6px !important;
+        }
+
         .cart-item-actions {
           display: flex;
           flex-direction: column;
@@ -891,6 +1100,44 @@ Please verify the payment in your account and confirm or reject my order. Thank 
           font-size: 12px;
           line-height: 1.6;
           margin: 10px 0 20px;
+        }
+
+        .order-success {
+          margin: 0 0 18px;
+          padding: 16px;
+          border-radius: 12px;
+          background: #f3faf5;
+          border: 1px solid #b7dfc6;
+          color: #176c3c;
+        }
+
+        .order-success h4 {
+          margin: 0 0 8px;
+          font-size: 17px;
+        }
+
+        .order-success p {
+          margin: 0 0 8px;
+          font-size: 13px;
+          line-height: 1.5;
+        }
+
+        .order-error {
+          margin: 0 0 16px;
+          padding: 12px 14px;
+          border-radius: 10px;
+          background: #fff4f2;
+          border: 1px solid #efc7c0;
+          color: #a44c3c;
+          font-size: 13px;
+          line-height: 1.5;
+        }
+
+        .order-whatsapp-link {
+          display: block;
+          text-align: center;
+          text-decoration: none;
+          box-sizing: border-box;
         }
 
         .customer-form {

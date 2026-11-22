@@ -70,4 +70,27 @@ api.interceptors.response.use(
   }
 );
 
+export function getApiErrorMessage(
+  error: unknown,
+  fallback = "Something went wrong. Please try again."
+): string {
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data;
+    if (
+      data &&
+      typeof data === "object" &&
+      "message" in data &&
+      typeof data.message === "string" &&
+      data.message.trim()
+    ) {
+      return data.message;
+    }
+    if (!error.response) {
+      return "Could not reach the restaurant. Check your connection and try again.";
+    }
+  }
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return fallback;
+}
+
 export default api;

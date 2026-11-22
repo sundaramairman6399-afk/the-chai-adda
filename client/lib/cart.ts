@@ -14,11 +14,34 @@ export type CartItem = {
 
 const KEY = "chai_cart";
 
+const isStoredCartItem = (value: unknown): value is CartItem => {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<CartItem>;
+  return (
+    typeof item.productId === "string" &&
+    item.productId.length > 0 &&
+    typeof item.name === "string" &&
+    typeof item.variantLabel === "string" &&
+    typeof item.unitPrice === "number" &&
+    Number.isFinite(item.unitPrice) &&
+    typeof item.quantity === "number" &&
+    Number.isInteger(item.quantity) &&
+    item.quantity > 0 &&
+    (item.image === undefined || typeof item.image === "string")
+  );
+};
+
 export const loadCart = (): CartItem[] => {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as CartItem[]) : [];
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isStoredCartItem).map((item) => ({
+      ...item,
+      cartKey: `${item.productId}-${item.variantLabel}`,
+    }));
   } catch {
     return [];
   }
