@@ -10,6 +10,9 @@ const DELIVERY_FEE = 30; // flat delivery fee in ₹
 const TAX_RATE = 0;       // set to e.g. 0.05 for 5% GST if needed
 
 // POST /api/orders
+const mongoose = require("mongoose");
+
+// POST /api/orders
 const createOrder = asyncHandler(async (req, res) => {
   const {
     customerName,
@@ -18,28 +21,30 @@ const createOrder = asyncHandler(async (req, res) => {
     orderType,
     deliveryAddress,
     specialInstructions,
-    items,       // [{ productId, variantLabel?, quantity, specialNote? }]
+    items,
     utr,
     couponCode,
   } = req.body;
 
-  // ----- Server-side price verification -----
+  // Verify every product and price on the server; never trust client totals.
   const resolvedItems = [];
   for (const item of items) {
     const product = await Product.findById(item.productId);
     if (!product) return sendError(res, 400, `Product ${item.productId} not found`);
-    if (!product.isAvailable) return sendError(res, 400, `${product.name} is currently unavailable`);
+    if (!product.isAvailable) {
+      return sendError(res, 400, `${product.name} is currently unavailable`);
+    }
 
     let unitPrice = product.price;
-
-    // If a variant was selected, verify it exists and use its price
     if (item.variantLabel && product.variants.length > 0) {
       const variant = product.variants.find(
         (v) => v.label.toLowerCase() === item.variantLabel.toLowerCase()
       );
-      if (!variant) return sendError(res, 400, `Variant '${item.variantLabel}' not found for ${product.name}`);
+      if (!variant) {
+        return sendError(res, 400, `Variant '${item.variantLabel}' not found for ${product.name}`);
+      }
       unitPrice = variant.price;
-    } else if (item.variantLabel && product.variants.length === 0) {
+    } else if (item.variantLabel) {
       return sendError(res, 400, `${product.name} does not have variants`);
     }
 
@@ -55,86 +60,109 @@ const createOrder = asyncHandler(async (req, res) => {
     });
   }
 
-  const subtotal = resolvedItems.reduce((sum, i) => sum + i.lineTotal, 0);
+  const subtotal = resolvedItems.reduce((sum, item) => sum + item.lineTotal, 0);
+  const deliveryFee = orderType === "delivery" ? DELIVERY_FEE : 0;
 
-  // ----- Coupon validation -----
-  let discount = 0;
-  let usedCoupon = null;
+  const buildOrderData = (discount) => {
+    const tax = Math.round((subtotal - discount) * TAX_RATE * 100) / 100;
+    return {
+      userId: req.user?.id || null,
+      customerName,
+      customerEmail: customerEmail || "",
+      customerPhone,
+      items: resolvedItems,
+      orderType,
+      deliveryAddress: deliveryAddress || "",
+      specialInstructions: specialInstructions || "",
+      subtotal,
+      discount,
+      couponCode: couponCode || "",
+      deliveryFee,
+      tax,
+      totalAmount: Math.max(0, subtotal - discount + deliveryFee + tax),
+      paymentMethod: "upi",
+      paymentStatus: "pending",
+      utr: utr || "",
+      orderStatus: "pending",
+      statusHistory: [{ status: "pending", note: "Order placed", updatedBy: req.user?.id }],
+      estimatedReadyAt: new Date(Date.now() + 20 * 60 * 1000),
+    };
+  };
+
+  let order;
 
   if (couponCode) {
-    const coupon = await Coupon.findOne({
-      code: couponCode.toUpperCase(),
-      isActive: true,
-      startDate: { $lte: new Date() },
-      expiryDate: { $gte: new Date() },
-    });
+    // The order and coupon usage are committed together. Concurrent requests
+    // contend on the same coupon document, so limits are checked against the
+    // latest committed usage rather than a stale read.
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        const now = new Date();
+        const coupon = await Coupon.findOne({
+          code: couponCode.toUpperCase(),
+          isActive: true,
+          startDate: { $lte: now },
+          expiryDate: { $gte: now },
+        }).session(session);
 
-    if (!coupon) return sendError(res, 400, "Invalid or expired coupon code");
-    if (subtotal < coupon.minimumOrderAmount) {
-      return sendError(res, 400, `Minimum order amount for this coupon is ₹${coupon.minimumOrderAmount}`);
-    }
-    if (coupon.usageLimit !== null && coupon.usageCount >= coupon.usageLimit) {
-      return sendError(res, 400, "This coupon has reached its usage limit");
-    }
-    if (req.user) {
-      const userUsed = coupon.usedBy.filter(
-        (uid) => uid.toString() === req.user.id
-      ).length;
-      if (userUsed >= coupon.perUserUsageLimit) {
-        return sendError(res, 400, "You have already used this coupon");
-      }
-    }
+        if (!coupon) {
+          const error = new Error("Invalid or expired coupon code");
+          error.statusCode = 400;
+          throw error;
+        }
 
-    discount =
-      coupon.discountType === "percentage"
-        ? Math.min(
-            (subtotal * coupon.discountValue) / 100,
-            coupon.maximumDiscount || Infinity
-          )
-        : Math.min(coupon.discountValue, subtotal);
+        if (subtotal < coupon.minimumOrderAmount) {
+          const error = new Error(
+            `Minimum order amount for this coupon is ₹${coupon.minimumOrderAmount}`
+          );
+          error.statusCode = 400;
+          throw error;
+        }
 
-    usedCoupon = coupon;
+        if (coupon.usageLimit !== null && coupon.usageCount >= coupon.usageLimit) {
+          const error = new Error("This coupon has reached its usage limit");
+          error.statusCode = 400;
+          throw error;
+        }
+
+        if (req.user) {
+          const userUsed = coupon.usedBy.filter(
+            (userId) => userId.toString() === req.user.id
+          ).length;
+          if (userUsed >= coupon.perUserUsageLimit) {
+            const error = new Error("You have already used this coupon");
+            error.statusCode = 400;
+            throw error;
+          }
+        }
+
+        const discount =
+          coupon.discountType === "percentage"
+            ? Math.min(
+                (subtotal * coupon.discountValue) / 100,
+                coupon.maximumDiscount == null ? Infinity : coupon.maximumDiscount
+              )
+            : Math.min(coupon.discountValue, subtotal);
+
+        order = new Order(buildOrderData(discount));
+        await order.save({ session });
+
+        coupon.usageCount += 1;
+        if (req.user) coupon.usedBy.push(req.user.id);
+        await coupon.save({ session });
+      });
+    } finally {
+      await session.endSession();
+    }
+  } else {
+    order = await Order.create(buildOrderData(0));
   }
 
-  const deliveryFee = orderType === "delivery" ? DELIVERY_FEE : 0;
-  const tax = Math.round((subtotal - discount) * TAX_RATE * 100) / 100;
-  const totalAmount = Math.max(0, subtotal - discount + deliveryFee + tax);
-
-  // ----- Create order -----
-  const order = await Order.create({
-    userId: req.user?.id || null,
-    customerName,
-    customerEmail: customerEmail || "",
-    customerPhone,
-    items: resolvedItems,
-    orderType,
-    deliveryAddress: deliveryAddress || "",
-    specialInstructions: specialInstructions || "",
-    subtotal,
-    discount,
-    couponCode: couponCode || "",
-    deliveryFee,
-    tax,
-    totalAmount,
-    paymentMethod: "upi",
-    paymentStatus: "pending",
-    utr: utr || "",
-    orderStatus: "pending",
-    statusHistory: [{ status: "pending", note: "Order placed", updatedBy: req.user?.id }],
-    estimatedReadyAt: new Date(Date.now() + 20 * 60 * 1000),
-  });
-
-  // Update coupon usage
-  if (usedCoupon) {
-    usedCoupon.usageCount += 1;
-    if (req.user) usedCoupon.usedBy.push(req.user.id);
-    await usedCoupon.save();
-  }
-
-  // Send confirmation email (non-blocking)
+  // Send email only after the database transaction has committed.
   if (customerEmail) {
-    sendOrderConfirmationEmail({ name: customerName }, order).catch((e) =>
-      console.error("[Order] Email failed:", e.message)
+    sendOrderConfirmationEmail({ name: customerName }, order).catch((error) =>
+      console.error("[Order] Email failed:", error.message)
     );
   }
 
