@@ -91,7 +91,6 @@ productSchema.pre("save", function (next) {
 });
 
 productSchema.index({ category: 1 });
-productSchema.index({ slug: 1 });
 productSchema.index({ isAvailable: 1 });
 productSchema.index({ name: "text", description: "text" });
 
